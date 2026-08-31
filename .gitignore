@@ -1,0 +1,16 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.token
+
+# Build and test output
+/bin/
+/toggl-automations
+coverage.out
+*.test
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
