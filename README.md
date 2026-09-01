@@ -62,9 +62,10 @@ List entries started during the last 48 hours, oldest first:
 toggl-automations entries list
 ```
 
-Each output line contains `start | finish | project | duration HH:MM |
+Each output line contains `start | finish | duration HH:MM | client | project |
 description` in the timezone configured in Toggl. A running entry uses
-`RUNNING` as its finish value and shows its elapsed duration.
+`RUNNING` as its finish value and shows its elapsed duration. Missing clients
+or projects are shown as `-`.
 
 Project selectors accept either an exact, case-sensitive name or an explicit
 ID in the form `id:123456`. A project name must be unique across your accessible

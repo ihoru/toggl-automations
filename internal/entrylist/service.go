@@ -23,6 +23,7 @@ type Entry struct {
 	Start       time.Time
 	Stop        time.Time
 	Running     bool
+	ClientName  string
 	ProjectName string
 	Duration    time.Duration
 	Description string
@@ -66,9 +67,9 @@ func (service *Service) List(ctx context.Context) ([]Entry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load Toggl projects: %w", err)
 	}
-	projectNames := make(map[int64]string, len(projects))
+	projectDetails := make(map[int64]projectInfo, len(projects))
 	for _, project := range projects {
-		projectNames[project.ID] = project.Name
+		projectDetails[project.ID] = projectInfo{name: project.Name, clientName: project.ClientName}
 	}
 
 	entries := make([]Entry, 0, len(rawEntries))
@@ -78,10 +79,12 @@ func (service *Service) List(ctx context.Context) ([]Entry, error) {
 			return nil, fmt.Errorf("parse start time for entry %d: %w", raw.ID, parseErr)
 		}
 
+		project := resolveProject(raw.ProjectID, projectDetails)
 		entry := Entry{
 			ID:          raw.ID,
 			Start:       start.In(location),
-			ProjectName: projectName(raw.ProjectID, projectNames),
+			ClientName:  project.clientName,
+			ProjectName: project.name,
 			Description: raw.Description,
 		}
 		if raw.Stop == nil || *raw.Stop == "" {
@@ -113,12 +116,21 @@ func (service *Service) List(ctx context.Context) ([]Entry, error) {
 	return entries, nil
 }
 
-func projectName(projectID int64, names map[int64]string) string {
+type projectInfo struct {
+	name       string
+	clientName string
+}
+
+func resolveProject(projectID int64, projects map[int64]projectInfo) projectInfo {
 	if projectID == 0 {
-		return "-"
+		return projectInfo{name: "-", clientName: "-"}
 	}
-	if name := names[projectID]; name != "" {
-		return name
+	result, ok := projects[projectID]
+	if !ok || result.name == "" {
+		return projectInfo{name: fmt.Sprintf("id:%d", projectID), clientName: "-"}
 	}
-	return fmt.Sprintf("id:%d", projectID)
+	if result.clientName == "" {
+		result.clientName = "-"
+	}
+	return result
 }

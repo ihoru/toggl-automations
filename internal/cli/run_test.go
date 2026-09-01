@@ -154,6 +154,7 @@ func TestRunEntriesListPrintsOneOldestFirstEntryPerLine(t *testing.T) {
 			ID:          1,
 			Start:       time.Date(2026, time.September, 1, 8, 0, 0, 0, time.UTC),
 			Stop:        stop,
+			ClientName:  "PSA",
 			ProjectName: "Build",
 			Duration:    65*time.Minute + 30*time.Second,
 			Description: "First\nentry",
@@ -162,6 +163,7 @@ func TestRunEntriesListPrintsOneOldestFirstEntryPerLine(t *testing.T) {
 			ID:          2,
 			Start:       time.Date(2026, time.September, 1, 11, 15, 0, 0, time.UTC),
 			Running:     true,
+			ClientName:  "-",
 			ProjectName: "-",
 			Duration:    45 * time.Minute,
 			Description: "Running",
@@ -187,8 +189,16 @@ func TestRunEntriesListPrintsOneOldestFirstEntryPerLine(t *testing.T) {
 		t.Fatalf("lines=%q", lines)
 	}
 	if !containsOutput(lines[0], "2026-09-01 08:00") || !containsOutput(lines[0], "2026-09-01 09:05") ||
-		!containsOutput(lines[0], "Build") || !containsOutput(lines[0], "01:05") || !containsOutput(lines[0], "First entry") {
+		!containsOutput(lines[0], "PSA") || !containsOutput(lines[0], "Build") ||
+		!containsOutput(lines[0], "01:05") || !containsOutput(lines[0], "First entry") {
 		t.Fatalf("first line=%q", lines[0])
+	}
+	finishIndex := strings.Index(lines[0], "2026-09-01 09:05")
+	durationIndex := strings.Index(lines[0], "01:05")
+	clientIndex := strings.Index(lines[0], "PSA")
+	projectIndex := strings.Index(lines[0], "Build")
+	if !(finishIndex < durationIndex && durationIndex < clientIndex && clientIndex < projectIndex) {
+		t.Fatalf("unexpected column order: %q", lines[0])
 	}
 	if !containsOutput(lines[1], "2026-09-01 11:15") || !containsOutput(lines[1], "RUNNING") ||
 		!containsOutput(lines[1], "00:45") || !containsOutput(lines[1], "Running") {

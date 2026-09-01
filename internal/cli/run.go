@@ -459,11 +459,12 @@ func printListedEntries(output io.Writer, entries []entrylist.Entry) {
 		}
 		fmt.Fprintf(
 			writer,
-			"%s\t|\t%s\t|\t%s\t|\t%s\t|\t%s\n",
+			"%s\t|\t%s\t|\t%s\t|\t%s\t|\t%s\t|\t%s\n",
 			entry.Start.Format("2006-01-02 15:04"),
 			finish,
-			singleLine(entry.ProjectName),
 			formatDuration(entry.Duration),
+			singleLine(entry.ClientName),
+			singleLine(entry.ProjectName),
 			singleLine(entry.Description),
 		)
 	}
@@ -528,7 +529,7 @@ func printEntriesListUsage(output io.Writer) {
 	fmt.Fprintln(output, "Usage: toggl-automations entries list")
 	fmt.Fprintln(output)
 	fmt.Fprintln(output, "Print time entries started in the last 48 hours, oldest first.")
-	fmt.Fprintln(output, "Each line contains: start | finish | project | duration HH:MM | description")
+	fmt.Fprintln(output, "Each line contains: start | finish | duration HH:MM | client | project | description")
 }
 
 func printAuthUsage(output io.Writer) {

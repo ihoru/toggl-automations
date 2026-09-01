@@ -18,7 +18,7 @@ func (api *fakeAPI) Me(context.Context) (toggl.User, error) {
 }
 
 func (api *fakeAPI) Projects(context.Context) ([]toggl.Project, error) {
-	return []toggl.Project{{ID: 42, Name: "Build"}}, nil
+	return []toggl.Project{{ID: 42, Name: "Build", ClientName: "PSA"}}, nil
 }
 
 func (api *fakeAPI) TimeEntries(_ context.Context, start, end time.Time) ([]toggl.TimeEntry, error) {
@@ -60,10 +60,10 @@ func TestServiceListsOldestFirstAndComputesRunningDuration(t *testing.T) {
 	if len(entries) != 2 || entries[0].ID != 1 || entries[1].ID != 2 {
 		t.Fatalf("entries = %#v", entries)
 	}
-	if entries[0].ProjectName != "Build" || entries[0].Duration != 65*time.Minute+30*time.Second {
+	if entries[0].ClientName != "PSA" || entries[0].ProjectName != "Build" || entries[0].Duration != 65*time.Minute+30*time.Second {
 		t.Fatalf("completed entry = %#v", entries[0])
 	}
-	if !entries[1].Running || entries[1].ProjectName != "-" || entries[1].Duration != 45*time.Minute {
+	if !entries[1].Running || entries[1].ClientName != "-" || entries[1].ProjectName != "-" || entries[1].Duration != 45*time.Minute {
 		t.Fatalf("running entry = %#v", entries[1])
 	}
 }
