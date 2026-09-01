@@ -56,6 +56,16 @@ command-line arguments or commit them to the repository.
 
 ## Usage
 
+### Contents
+
+- [`entries list` — list recent entries](#list-recent-entries)
+- [`entries rewrite` — find and update entries](#rewrite-time-entries)
+  - [Search](#search-for-matches)
+  - [Preview changes](#preview-changes)
+  - [Apply changes](#apply-changes)
+
+### List recent entries
+
 List entries started during the last 48 hours, oldest first:
 
 ```sh
@@ -67,9 +77,13 @@ description` in the timezone configured in Toggl. A running entry uses
 `RUNNING` as its finish value and shows its elapsed duration. Missing clients
 or projects are shown as `-`.
 
+### Rewrite time entries
+
 Project selectors accept either an exact, case-sensitive name or an explicit
 ID in the form `id:123456`. A project name must be unique across your accessible
 workspaces; otherwise, use its ID.
+
+#### Search for matches
 
 Search only. This prints the total number of matches and the latest ten:
 
@@ -78,6 +92,8 @@ toggl-automations entries rewrite \
   --description "X" \
   --project "Y"
 ```
+
+#### Preview changes
 
 Preview a description and project replacement:
 
@@ -89,6 +105,8 @@ toggl-automations entries rewrite \
   --new-project "J"
 ```
 
+#### Apply changes
+
 Apply the same replacement after reviewing the preview:
 
 ```sh
@@ -99,6 +117,8 @@ toggl-automations entries rewrite \
   --new-project "J" \
   --apply
 ```
+
+#### Replacement options
 
 `--new-description` and `--new-project` are independent. Omit either one to
 leave that field unchanged. Empty descriptions and removing a project are not
