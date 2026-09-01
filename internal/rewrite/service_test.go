@@ -199,6 +199,31 @@ func TestServiceRejectsAmbiguousProjectName(t *testing.T) {
 	}
 }
 
+func TestServiceAllowsActiveTargetWhenCanTrackTimeIsFalse(t *testing.T) {
+	t.Parallel()
+
+	api := &fakeAPI{
+		user: toggl.User{ID: 3, Timezone: "UTC", CreatedAt: "2026-01-01T00:00:00Z"},
+		projects: []toggl.Project{
+			{ID: 42, Name: "sports", WorkspaceID: 7, Active: true, CanTrackTime: true},
+			{ID: 191506018, Name: "household", WorkspaceID: 7, Active: true, CanTrackTime: false},
+		},
+	}
+
+	newProject := "household"
+	result, err := NewService(api).Run(context.Background(), Request{
+		Description: "dog walk",
+		Project:     "sports",
+		NewProject:  &newProject,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.TargetProject == nil || result.TargetProject.ID != 191506018 {
+		t.Fatalf("target project = %#v", result.TargetProject)
+	}
+}
+
 func TestServiceRejectsRepeatedPaginationCursor(t *testing.T) {
 	t.Parallel()
 

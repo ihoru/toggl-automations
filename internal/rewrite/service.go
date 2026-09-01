@@ -241,9 +241,6 @@ func resolveTargetProject(selector string, workspaceID int64, projects []toggl.P
 	if !project.Active {
 		return toggl.Project{}, fmt.Errorf("target project %q (id:%d) is archived", project.Name, project.ID)
 	}
-	if !project.CanTrackTime {
-		return toggl.Project{}, fmt.Errorf("time cannot be tracked against target project %q (id:%d)", project.Name, project.ID)
-	}
 	return project, nil
 }
 
