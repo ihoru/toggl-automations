@@ -31,16 +31,28 @@ go build -o bin/toggl-automations ./cmd/toggl-automations
 
 ## Configure the API token
 
-The token is read only from `TOGGL_API_TOKEN`. Do not pass it as a command-line
-argument or commit it to a file in this repository.
-
-For a shell session without placing the token in shell history:
+Save the token once using a hidden terminal prompt:
 
 ```sh
-read -rsp "Toggl API token: " TOGGL_API_TOKEN
-echo
-export TOGGL_API_TOKEN
+toggl-automations auth login
 ```
+
+The command stores the token in the operating system keyring. If no keyring is
+available, it falls back to `$XDG_CONFIG_HOME/toggl-automations/token` (or
+`~/.config/toggl-automations/token` by default) and requires file permissions
+`0600`.
+
+Check or remove the stored credential without printing the full token:
+
+```sh
+toggl-automations auth status
+toggl-automations auth logout
+```
+
+`TOGGL_API_TOKEN` remains the highest-priority override for CI and temporary
+shell sessions. To import an already exported value into persistent storage,
+run `toggl-automations auth login --from-env` once. Do not pass tokens as
+command-line arguments or commit them to the repository.
 
 ## Usage
 

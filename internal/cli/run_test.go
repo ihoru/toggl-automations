@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"testing"
 	"time"
 
+	"github.com/ihoru/toggl-automations/internal/credentials"
 	"github.com/ihoru/toggl-automations/internal/rewrite"
 	"github.com/ihoru/toggl-automations/internal/toggl"
 )
@@ -20,6 +22,48 @@ type fakeEngine struct {
 func (engine *fakeEngine) Run(_ context.Context, request rewrite.Request) (rewrite.Result, error) {
 	engine.request = request
 	return engine.result, engine.err
+}
+
+type fakeCredentials struct {
+	token      string
+	source     credentials.Source
+	loadErr    error
+	saveErr    error
+	deleteErr  error
+	deleted    bool
+	savedToken string
+}
+
+func (store *fakeCredentials) Load() (string, credentials.Source, error) {
+	if store.loadErr != nil {
+		return "", "", store.loadErr
+	}
+	if store.token == "" {
+		return "", "", credentials.ErrNotFound
+	}
+	return store.token, store.source, nil
+}
+
+func (store *fakeCredentials) Save(token string) (credentials.Source, error) {
+	if store.saveErr != nil {
+		return "", store.saveErr
+	}
+	store.token = token
+	store.savedToken = token
+	if store.source == "" {
+		store.source = credentials.SourceKeyring
+	}
+	return store.source, nil
+}
+
+func (store *fakeCredentials) Delete() (bool, error) {
+	if store.deleteErr != nil {
+		return false, store.deleteErr
+	}
+	removed := store.token != ""
+	store.token = ""
+	store.deleted = true
+	return removed, nil
 }
 
 func TestRunSearchPrintsOnlyLatestTenEntries(t *testing.T) {
@@ -50,13 +94,12 @@ func TestRunSearchPrintsOnlyLatestTenEntries(t *testing.T) {
 		[]string{"entries", "rewrite", "--description", "X", "--project", "Y"},
 		&stdout,
 		&stderr,
-		func(string) string { return "token" },
-		func(token string) Engine {
+		Dependencies{Getenv: func(string) string { return "token" }, Factory: func(token string) Engine {
 			if token != "token" {
 				t.Fatalf("token = %q", token)
 			}
 			return engine
-		},
+		}},
 	)
 	if status != 0 {
 		t.Fatalf("status = %d, stderr = %q", status, stderr.String())
@@ -66,6 +109,50 @@ func TestRunSearchPrintsOnlyLatestTenEntries(t *testing.T) {
 	}
 	if engine.request.HasChanges() || engine.request.Apply {
 		t.Fatalf("request = %#v", engine.request)
+	}
+}
+
+func TestRunHelpListsCommands(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	status := Run(
+		context.Background(),
+		[]string{"--help"},
+		&stdout,
+		&stderr,
+		Dependencies{},
+	)
+	if status != 0 || stderr.Len() != 0 {
+		t.Fatalf("status=%d stdout=%q stderr=%q", status, stdout.String(), stderr.String())
+	}
+	for _, expected := range []string{"auth login", "auth status", "auth logout", "entries rewrite", "--help"} {
+		if !containsOutput(stdout.String(), expected) {
+			t.Fatalf("help does not contain %q: %q", expected, stdout.String())
+		}
+	}
+}
+
+func TestRunRewriteHelpListsOptions(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	status := Run(
+		context.Background(),
+		[]string{"entries", "rewrite", "--help"},
+		&stdout,
+		&stderr,
+		Dependencies{},
+	)
+	if status != 0 || stderr.Len() != 0 {
+		t.Fatalf("status=%d stdout=%q stderr=%q", status, stdout.String(), stderr.String())
+	}
+	for _, expected := range []string{"--description", "--project", "--new-description", "--new-project", "--apply"} {
+		if !containsOutput(stdout.String(), expected) {
+			t.Fatalf("help does not contain %q: %q", expected, stdout.String())
+		}
 	}
 }
 
@@ -90,8 +177,7 @@ func TestRunParsesPreviewReplacementFlags(t *testing.T) {
 		},
 		&stdout,
 		&stderr,
-		func(string) string { return "token" },
-		func(string) Engine { return engine },
+		Dependencies{Getenv: func(string) string { return "token" }, Factory: func(string) Engine { return engine }},
 	)
 	if status != 0 {
 		t.Fatalf("status = %d, stderr = %q", status, stderr.String())
@@ -117,11 +203,10 @@ func TestRunRejectsApplyWithoutReplacementBeforeCreatingEngine(t *testing.T) {
 		[]string{"entries", "rewrite", "--description", "X", "--project", "Y", "--apply"},
 		&bytes.Buffer{},
 		&stderr,
-		func(string) string { return "token" },
-		func(string) Engine {
+		Dependencies{Getenv: func(string) string { return "token" }, Factory: func(string) Engine {
 			created = true
 			return &fakeEngine{}
-		},
+		}},
 	)
 	if status != 2 || created || !containsOutput(stderr.String(), "--apply requires") {
 		t.Fatalf("status=%d created=%v stderr=%q", status, created, stderr.String())
@@ -137,11 +222,129 @@ func TestRunRequiresToken(t *testing.T) {
 		[]string{"entries", "rewrite", "--description", "X", "--project", "Y"},
 		&bytes.Buffer{},
 		&stderr,
-		func(string) string { return "" },
-		func(string) Engine { return &fakeEngine{} },
+		Dependencies{Factory: func(string) Engine { return &fakeEngine{} }},
 	)
-	if status != 2 || !containsOutput(stderr.String(), "TOGGL_API_TOKEN is not set") {
+	if status != 2 || !containsOutput(stderr.String(), "auth login") {
 		t.Fatalf("status=%d stderr=%q", status, stderr.String())
+	}
+}
+
+func TestRunUsesStoredToken(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeCredentials{token: "stored-token", source: credentials.SourceKeyring}
+	engine := &fakeEngine{result: rewrite.Result{
+		Ready:         true,
+		SourceProject: toggl.Project{ID: 42, Name: "Y", WorkspaceID: 7},
+		Timezone:      "UTC",
+	}}
+	var stderr bytes.Buffer
+	status := Run(
+		context.Background(),
+		[]string{"entries", "rewrite", "--description", "X", "--project", "Y"},
+		&bytes.Buffer{},
+		&stderr,
+		Dependencies{Credentials: store, Factory: func(token string) Engine {
+			if token != "stored-token" {
+				t.Fatalf("token=%q", token)
+			}
+			return engine
+		}},
+	)
+	if status != 0 {
+		t.Fatalf("status=%d stderr=%q", status, stderr.String())
+	}
+}
+
+func TestRunAuthLoginSavesSecretWithoutPrintingIt(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeCredentials{}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	status := Run(
+		context.Background(),
+		[]string{"auth", "login"},
+		&stdout,
+		&stderr,
+		Dependencies{
+			Credentials: store,
+			ReadSecret: func(io.Writer) (string, error) {
+				return "0123456789abcdef", nil
+			},
+		},
+	)
+	if status != 0 || store.savedToken != "0123456789abcdef" {
+		t.Fatalf("status=%d saved=%q stderr=%q", status, store.savedToken, stderr.String())
+	}
+	if containsOutput(stdout.String(), store.savedToken) || !containsOutput(stdout.String(), "system keyring") {
+		t.Fatalf("stdout=%q", stdout.String())
+	}
+}
+
+func TestRunAuthLoginCanImportEnvironment(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeCredentials{source: credentials.SourceFile}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	status := Run(
+		context.Background(),
+		[]string{"auth", "login", "--from-env"},
+		&stdout,
+		&stderr,
+		Dependencies{
+			Credentials: store,
+			Getenv: func(name string) string {
+				if name == "TOGGL_API_TOKEN" {
+					return "environment-token"
+				}
+				return ""
+			},
+		},
+	)
+	if status != 0 || store.savedToken != "environment-token" {
+		t.Fatalf("status=%d saved=%q stderr=%q", status, store.savedToken, stderr.String())
+	}
+}
+
+func TestRunAuthStatusMasksTokenAndReportsSource(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeCredentials{token: "0123456789abcdef", source: credentials.SourceFile}
+	var stdout bytes.Buffer
+	status := Run(
+		context.Background(),
+		[]string{"auth", "status"},
+		&stdout,
+		&bytes.Buffer{},
+		Dependencies{Credentials: store},
+	)
+	if status != 0 || !containsOutput(stdout.String(), "secure config file, ...cdef") {
+		t.Fatalf("status=%d stdout=%q", status, stdout.String())
+	}
+	if containsOutput(stdout.String(), store.token) {
+		t.Fatalf("full token leaked: %q", stdout.String())
+	}
+}
+
+func TestRunAuthLogoutDeletesStoredTokenAndWarnsAboutEnvironment(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeCredentials{token: "stored-token"}
+	var stdout bytes.Buffer
+	status := Run(
+		context.Background(),
+		[]string{"auth", "logout"},
+		&stdout,
+		&bytes.Buffer{},
+		Dependencies{
+			Credentials: store,
+			Getenv:      func(string) string { return "environment-token" },
+		},
+	)
+	if status != 0 || !store.deleted || !containsOutput(stdout.String(), "still set") {
+		t.Fatalf("status=%d deleted=%v stdout=%q", status, store.deleted, stdout.String())
 	}
 }
 
@@ -167,8 +370,7 @@ func TestRunPrintsPartialFailureSummary(t *testing.T) {
 		[]string{"entries", "rewrite", "--description", "X", "--project", "Y", "--new-description", newDescription, "--apply"},
 		&stdout,
 		&stderr,
-		func(string) string { return "token" },
-		func(string) Engine { return engine },
+		Dependencies{Getenv: func(string) string { return "token" }, Factory: func(string) Engine { return engine }},
 	)
 	if status != 1 || !containsOutput(stdout.String(), "Failed: 1") || !containsOutput(stdout.String(), "2: locked") {
 		t.Fatalf("status=%d stdout=%q stderr=%q", status, stdout.String(), stderr.String())
@@ -191,8 +393,7 @@ func ExampleRun_search() {
 		[]string{"entries", "rewrite", "--description", "X", "--project", "Y"},
 		&output,
 		&bytes.Buffer{},
-		func(string) string { return "token" },
-		func(string) Engine { return engine },
+		Dependencies{Getenv: func(string) string { return "token" }, Factory: func(string) Engine { return engine }},
 	)
 	fmt.Println(status)
 	// Output: 0
