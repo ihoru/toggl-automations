@@ -8,8 +8,10 @@ import (
 	"io"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/ihoru/toggl-automations/internal/credentials"
+	"github.com/ihoru/toggl-automations/internal/entrylist"
 	"github.com/ihoru/toggl-automations/internal/rewrite"
 	"github.com/ihoru/toggl-automations/internal/toggl"
 )
@@ -19,6 +21,12 @@ type Engine interface {
 }
 
 type EngineFactory func(token string) Engine
+
+type EntryLister interface {
+	List(context.Context) ([]entrylist.Entry, error)
+}
+
+type EntryListFactory func(token string) EntryLister
 
 type Getenv func(string) string
 
@@ -35,6 +43,7 @@ type Dependencies struct {
 	Credentials CredentialStore
 	ReadSecret  ReadSecret
 	Factory     EngineFactory
+	ListFactory EntryListFactory
 }
 
 func Run(
@@ -51,9 +60,18 @@ func Run(
 	if len(args) >= 1 && args[0] == "auth" {
 		return runAuth(args[1:], stdout, stderr, dependencies)
 	}
+	if len(args) >= 1 && args[0] == "entries" {
+		if len(args) == 1 || (len(args) == 2 && isHelp(args[1])) {
+			printEntriesUsage(stdout)
+			return 0
+		}
+		if args[1] == "list" {
+			return runEntriesList(ctx, args[2:], stdout, stderr, dependencies)
+		}
+	}
 	if len(args) < 2 || args[0] != "entries" || args[1] != "rewrite" {
 		printUsage(stderr)
-		fmt.Fprintln(stderr, "error: expected subcommand: auth or entries rewrite")
+		fmt.Fprintln(stderr, "error: expected subcommand: auth, entries list, or entries rewrite")
 		return 2
 	}
 	if len(args) == 3 && isHelp(args[2]) {
@@ -119,6 +137,46 @@ func Run(
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
+	return 0
+}
+
+func runEntriesList(
+	ctx context.Context,
+	args []string,
+	stdout io.Writer,
+	stderr io.Writer,
+	dependencies Dependencies,
+) int {
+	if len(args) == 1 && isHelp(args[0]) {
+		printEntriesListUsage(stdout)
+		return 0
+	}
+	if len(args) != 0 {
+		fmt.Fprintln(stderr, "error: entries list does not accept arguments")
+		return 2
+	}
+
+	token, err := resolveToken(dependencies)
+	if errors.Is(err, credentials.ErrNotFound) {
+		fmt.Fprintln(stderr, "error: Toggl API token is not configured; run 'toggl-automations auth login' or set TOGGL_API_TOKEN")
+		return 2
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "error: load Toggl API token: %v\n", err)
+		return 1
+	}
+	factory := dependencies.ListFactory
+	if factory == nil {
+		factory = func(token string) EntryLister {
+			return entrylist.NewService(toggl.NewClient(token))
+		}
+	}
+	entries, err := factory(token).List(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 1
+	}
+	printListedEntries(stdout, entries)
 	return 0
 }
 
@@ -392,6 +450,42 @@ func printChanges(output io.Writer, changes []rewrite.Change) {
 	writer.Flush()
 }
 
+func printListedEntries(output io.Writer, entries []entrylist.Entry) {
+	writer := tabwriter.NewWriter(output, 0, 4, 1, ' ', 0)
+	for _, entry := range entries {
+		finish := "RUNNING"
+		if !entry.Running {
+			finish = entry.Stop.Format("2006-01-02 15:04")
+		}
+		fmt.Fprintf(
+			writer,
+			"%s\t|\t%s\t|\t%s\t|\t%s\t|\t%s\n",
+			entry.Start.Format("2006-01-02 15:04"),
+			finish,
+			singleLine(entry.ProjectName),
+			formatDuration(entry.Duration),
+			singleLine(entry.Description),
+		)
+	}
+	writer.Flush()
+}
+
+func singleLine(value string) string {
+	value = strings.Join(strings.Fields(value), " ")
+	if value == "" {
+		return "-"
+	}
+	return value
+}
+
+func formatDuration(duration time.Duration) string {
+	if duration < 0 {
+		duration = 0
+	}
+	totalMinutes := int64(duration / time.Minute)
+	return fmt.Sprintf("%02d:%02d", totalMinutes/60, totalMinutes%60)
+}
+
 func latestEntries(entries []rewrite.Entry, count int) []rewrite.Entry {
 	if len(entries) <= count {
 		return entries
@@ -413,12 +507,28 @@ func printUsage(output io.Writer) {
 	fmt.Fprintln(output, "  auth login       Save the Toggl API token")
 	fmt.Fprintln(output, "  auth status      Show whether a token is configured")
 	fmt.Fprintln(output, "  auth logout      Remove the stored token")
+	fmt.Fprintln(output, "  entries list     List time entries started in the last 48 hours")
 	fmt.Fprintln(output, "  entries rewrite  Find, preview, or update time entries")
 	fmt.Fprintln(output)
 	fmt.Fprintln(output, "Options:")
 	fmt.Fprintln(output, "  -h, --help        Show help")
 	fmt.Fprintln(output)
 	fmt.Fprintln(output, "Run 'toggl-automations <command> --help' for command-specific help.")
+}
+
+func printEntriesUsage(output io.Writer) {
+	fmt.Fprintln(output, "Usage: toggl-automations entries <command>")
+	fmt.Fprintln(output)
+	fmt.Fprintln(output, "Commands:")
+	fmt.Fprintln(output, "  list     List time entries started in the last 48 hours")
+	fmt.Fprintln(output, "  rewrite  Find, preview, or update time entries")
+}
+
+func printEntriesListUsage(output io.Writer) {
+	fmt.Fprintln(output, "Usage: toggl-automations entries list")
+	fmt.Fprintln(output)
+	fmt.Fprintln(output, "Print time entries started in the last 48 hours, oldest first.")
+	fmt.Fprintln(output, "Each line contains: start | finish | project | duration HH:MM | description")
 }
 
 func printAuthUsage(output io.Writer) {

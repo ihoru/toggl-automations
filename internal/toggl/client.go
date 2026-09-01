@@ -53,6 +53,18 @@ type CurrentTimeEntry struct {
 	Stop        *string `json:"stop"`
 }
 
+type TimeEntry struct {
+	ID          int64   `json:"id"`
+	WorkspaceID int64   `json:"workspace_id"`
+	LegacyWid   int64   `json:"wid"`
+	ProjectID   int64   `json:"project_id"`
+	LegacyPID   int64   `json:"pid"`
+	Description string  `json:"description"`
+	Start       string  `json:"start"`
+	Stop        *string `json:"stop"`
+	Duration    int64   `json:"duration"`
+}
+
 type ReportRow struct {
 	Description string            `json:"description"`
 	ProjectID   int64             `json:"project_id"`
@@ -208,6 +220,41 @@ func (c *Client) Projects(ctx context.Context) ([]Project, error) {
 		return nil, fmt.Errorf("decode Toggl projects: %w", err)
 	}
 	return wrapped.Items, nil
+}
+
+func (c *Client) TimeEntries(ctx context.Context, start, end time.Time) ([]TimeEntry, error) {
+	if end.Before(start) {
+		return nil, errors.New("time entry range ends before it starts")
+	}
+	query := url.Values{
+		"start_date": []string{start.UTC().Format(time.RFC3339)},
+		"end_date":   []string{end.UTC().Format(time.RFC3339)},
+	}
+	var raw json.RawMessage
+	_, err := c.doJSON(ctx, http.MethodGet, "/api/v9/me/time_entries?"+query.Encode(), nil, &raw)
+	if err != nil {
+		return nil, err
+	}
+
+	var entries []TimeEntry
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		var wrapped struct {
+			Data []TimeEntry `json:"data"`
+		}
+		if wrappedErr := json.Unmarshal(raw, &wrapped); wrappedErr != nil {
+			return nil, fmt.Errorf("decode Toggl time entries: %w", err)
+		}
+		entries = wrapped.Data
+	}
+	for index := range entries {
+		if entries[index].WorkspaceID == 0 {
+			entries[index].WorkspaceID = entries[index].LegacyWid
+		}
+		if entries[index].ProjectID == 0 {
+			entries[index].ProjectID = entries[index].LegacyPID
+		}
+	}
+	return entries, nil
 }
 
 func (c *Client) CurrentTimeEntry(ctx context.Context) (*CurrentTimeEntry, error) {

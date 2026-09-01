@@ -56,6 +56,16 @@ command-line arguments or commit them to the repository.
 
 ## Usage
 
+List entries started during the last 48 hours, oldest first:
+
+```sh
+toggl-automations entries list
+```
+
+Each output line contains `start | finish | project | duration HH:MM |
+description` in the timezone configured in Toggl. A running entry uses
+`RUNNING` as its finish value and shows its elapsed duration.
+
 Project selectors accept either an exact, case-sensitive name or an explicit
 ID in the form `id:123456`. A project name must be unique across your accessible
 workspaces; otherwise, use its ID.

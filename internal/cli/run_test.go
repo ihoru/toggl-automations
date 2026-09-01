@@ -5,10 +5,12 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/ihoru/toggl-automations/internal/credentials"
+	"github.com/ihoru/toggl-automations/internal/entrylist"
 	"github.com/ihoru/toggl-automations/internal/rewrite"
 	"github.com/ihoru/toggl-automations/internal/toggl"
 )
@@ -32,6 +34,15 @@ type fakeCredentials struct {
 	deleteErr  error
 	deleted    bool
 	savedToken string
+}
+
+type fakeEntryLister struct {
+	entries []entrylist.Entry
+	err     error
+}
+
+func (lister *fakeEntryLister) List(context.Context) ([]entrylist.Entry, error) {
+	return lister.entries, lister.err
 }
 
 func (store *fakeCredentials) Load() (string, credentials.Source, error) {
@@ -127,10 +138,61 @@ func TestRunHelpListsCommands(t *testing.T) {
 	if status != 0 || stderr.Len() != 0 {
 		t.Fatalf("status=%d stdout=%q stderr=%q", status, stdout.String(), stderr.String())
 	}
-	for _, expected := range []string{"auth login", "auth status", "auth logout", "entries rewrite", "--help"} {
+	for _, expected := range []string{"auth login", "auth status", "auth logout", "entries list", "entries rewrite", "--help"} {
 		if !containsOutput(stdout.String(), expected) {
 			t.Fatalf("help does not contain %q: %q", expected, stdout.String())
 		}
+	}
+}
+
+func TestRunEntriesListPrintsOneOldestFirstEntryPerLine(t *testing.T) {
+	t.Parallel()
+
+	stop := time.Date(2026, time.September, 1, 9, 5, 0, 0, time.UTC)
+	lister := &fakeEntryLister{entries: []entrylist.Entry{
+		{
+			ID:          1,
+			Start:       time.Date(2026, time.September, 1, 8, 0, 0, 0, time.UTC),
+			Stop:        stop,
+			ProjectName: "Build",
+			Duration:    65*time.Minute + 30*time.Second,
+			Description: "First\nentry",
+		},
+		{
+			ID:          2,
+			Start:       time.Date(2026, time.September, 1, 11, 15, 0, 0, time.UTC),
+			Running:     true,
+			ProjectName: "-",
+			Duration:    45 * time.Minute,
+			Description: "Running",
+		},
+	}}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	status := Run(
+		context.Background(),
+		[]string{"entries", "list"},
+		&stdout,
+		&stderr,
+		Dependencies{
+			Getenv:      func(string) string { return "token" },
+			ListFactory: func(string) EntryLister { return lister },
+		},
+	)
+	if status != 0 || stderr.Len() != 0 {
+		t.Fatalf("status=%d stdout=%q stderr=%q", status, stdout.String(), stderr.String())
+	}
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("lines=%q", lines)
+	}
+	if !containsOutput(lines[0], "2026-09-01 08:00") || !containsOutput(lines[0], "2026-09-01 09:05") ||
+		!containsOutput(lines[0], "Build") || !containsOutput(lines[0], "01:05") || !containsOutput(lines[0], "First entry") {
+		t.Fatalf("first line=%q", lines[0])
+	}
+	if !containsOutput(lines[1], "2026-09-01 11:15") || !containsOutput(lines[1], "RUNNING") ||
+		!containsOutput(lines[1], "00:45") || !containsOutput(lines[1], "Running") {
+		t.Fatalf("second line=%q", lines[1])
 	}
 }
 

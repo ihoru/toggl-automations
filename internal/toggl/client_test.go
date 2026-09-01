@@ -81,6 +81,38 @@ func TestClientSearchEntriesSendsFiltersAndParsesCursor(t *testing.T) {
 	}
 }
 
+func TestClientTimeEntriesSendsRFC3339RangeAndNormalizesLegacyIDs(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodGet || request.URL.Path != "/api/v9/me/time_entries" {
+			t.Fatalf("unexpected request: %s %s", request.Method, request.URL.Path)
+		}
+		if got := request.URL.Query().Get("start_date"); got != "2026-08-30T12:00:00Z" {
+			t.Fatalf("start_date = %q", got)
+		}
+		if got := request.URL.Query().Get("end_date"); got != "2026-09-01T12:00:00Z" {
+			t.Fatalf("end_date = %q", got)
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		io.WriteString(writer, `{"data":[{"id":99,"wid":7,"pid":42,"start":"2026-08-31T10:00:00Z","stop":"2026-08-31T11:00:00Z","duration":3600,"description":"Build"}]}`)
+	}))
+	defer server.Close()
+
+	client := NewClientWithConfig("token", Config{BaseURL: server.URL, HTTPClient: server.Client(), MaxAttempts: 1})
+	entries, err := client.TimeEntries(
+		context.Background(),
+		time.Date(2026, time.August, 30, 12, 0, 0, 0, time.UTC),
+		time.Date(2026, time.September, 1, 12, 0, 0, 0, time.UTC),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].ID != 99 || entries[0].WorkspaceID != 7 || entries[0].ProjectID != 42 {
+		t.Fatalf("entries = %#v", entries)
+	}
+}
+
 func TestClientBulkPatchUsesJSONPatchAndParsesPartialResult(t *testing.T) {
 	t.Parallel()
 
