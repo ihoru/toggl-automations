@@ -2,13 +2,22 @@
 
 [![CI](https://github.com/ihoru/toggl-automations/actions/workflows/ci.yml/badge.svg)](https://github.com/ihoru/toggl-automations/actions/workflows/ci.yml)
 
-A small, safety-first Go CLI for previewing and bulk-rewriting your own
+A safety-first Go CLI for inspecting and bulk-rewriting your own
 [Toggl Track](https://toggl.com/track/) time entries.
 
-The first automation finds entries with an exact description and project,
-shows a preview, and can replace the description, project, or both. It searches
-from the account creation date, ignores other users' entries, and skips the
-currently running timer.
+Toggl Automations is built for account-wide cleanup where a broad API filter,
+partial batch failure, or accidentally matching another user's data would be costly.
+It separates search, preview, and mutation; rechecks exact matches locally; paginates
+complete account history; and never rewrites the currently running timer.
+
+## Engineering highlights
+
+- Secure token storage through the operating-system keyring with a permission-checked
+  file fallback.
+- Bounded Reports API pagination and local exact-match enforcement.
+- Idempotent JSON Patch updates in batches of at most 100 entries.
+- Explicit per-entry reporting when Toggl completes a bulk update only partially.
+- Tests use local HTTP servers, including API, credential, CLI, and failure paths.
 
 ## Requirements
 
